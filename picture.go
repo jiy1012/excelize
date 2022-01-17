@@ -332,6 +332,69 @@ func (f *File) addDrawingPicture(sheet, drawingXML, cell, file string, width, he
 	return err
 }
 
+// addDrawingPicture provides a function to add picture by given sheet,
+// drawingXML, cell, file name, width, height relationship index and format
+// sets.
+func (f *File) addDrawingLinkPicture(sheet, drawingXML, cell, file string, width, height, rID, hyperlinkRID int, formatSet *formatPicture) error {
+	col, row, err := CellNameToCoordinates(cell)
+	if err != nil {
+		return err
+	}
+	if formatSet.Autofit {
+		width, height, col, row, err = f.drawingResize(sheet, cell, float64(width), float64(height), formatSet)
+		if err != nil {
+			return err
+		}
+	} else {
+		width = int(float64(width) * formatSet.XScale)
+		height = int(float64(height) * formatSet.YScale)
+	}
+	col--
+	row--
+	colStart, rowStart, colEnd, rowEnd, x2, y2 :=
+		f.positionObjectPixels(sheet, col, row, formatSet.OffsetX, formatSet.OffsetY, width, height)
+	content, cNvPrID := f.drawingParser(drawingXML)
+	twoCellAnchor := xdrCellAnchor{}
+	twoCellAnchor.EditAs = formatSet.Positioning
+	from := xlsxFrom{}
+	from.Col = colStart
+	from.ColOff = formatSet.OffsetX * EMU
+	from.Row = rowStart
+	from.RowOff = formatSet.OffsetY * EMU
+	to := xlsxTo{}
+	to.Col = colEnd
+	to.ColOff = x2 * EMU
+	to.Row = rowEnd
+	to.RowOff = y2 * EMU
+	twoCellAnchor.From = &from
+	twoCellAnchor.To = &to
+	pic := xlsxPic{}
+	pic.NvPicPr.CNvPicPr.PicLocks.NoChangeAspect = formatSet.NoChangeAspect
+	pic.NvPicPr.CNvPr.ID = cNvPrID
+	pic.NvPicPr.CNvPr.Descr = file
+	pic.NvPicPr.CNvPr.Name = "Picture " + strconv.Itoa(cNvPrID)
+	if hyperlinkRID != 0 {
+		pic.NvPicPr.CNvPr.HlinkClick = &xlsxHlinkClick{
+			R:   SourceRelationship.Value,
+			RID: "rId" + strconv.Itoa(hyperlinkRID),
+		}
+	}
+	pic.BlipFill.Blip.R = SourceRelationship.Value
+	pic.BlipFill.Blip.Link = "rId" + strconv.Itoa(rID)
+	pic.SpPr.PrstGeom.Prst = "rect"
+
+	twoCellAnchor.Pic = &pic
+	twoCellAnchor.ClientData = &xdrClientData{
+		FLocksWithSheet:  formatSet.FLocksWithSheet,
+		FPrintsWithSheet: formatSet.FPrintsWithSheet,
+	}
+	content.Lock()
+	defer content.Unlock()
+	content.TwoCellAnchor = append(content.TwoCellAnchor, &twoCellAnchor)
+	f.Drawings.Store(drawingXML, content)
+	return err
+}
+
 // countMedia provides a function to get media files count storage in the
 // folder xl/media/image.
 func (f *File) countMedia() int {
@@ -611,6 +674,16 @@ func (f *File) getPictureFromWsDr(row, col int, drawingRelationships string, wsD
 			if anchor.From.Col == col && anchor.From.Row == row {
 				if drawRel = f.getDrawingRelationships(drawingRelationships,
 					anchor.Pic.BlipFill.Blip.Embed); drawRel != nil {
+					if _, ok = supportImageTypes[filepath.Ext(drawRel.Target)]; ok {
+						ret = filepath.Base(drawRel.Target)
+						if buffer, _ := f.Pkg.Load(strings.Replace(drawRel.Target, "..", "xl", -1)); buffer != nil {
+							buf = buffer.([]byte)
+						}
+						return
+					}
+				}
+				if drawRel = f.getDrawingRelationships(drawingRelationships,
+					anchor.Pic.BlipFill.Blip.Link); drawRel != nil {
 					if _, ok = supportImageTypes[filepath.Ext(drawRel.Target)]; ok {
 						ret = filepath.Base(drawRel.Target)
 						if buffer, _ := f.Pkg.Load(strings.Replace(drawRel.Target, "..", "xl", -1)); buffer != nil {
