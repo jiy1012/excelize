@@ -18,7 +18,7 @@ import (
 	"strconv"
 )
 
-func (f *File) AddUrlMark(sheet, url string) error {
+func (f *File) AddUrlMark(sheet, cell, url string) error {
 	// Read sheet data.
 	ws, err := f.workSheetReader(sheet)
 	if err != nil {
@@ -36,7 +36,10 @@ func (f *File) AddUrlMark(sheet, url string) error {
 	f.addMedia(file, ext)
 	drawingRID := f.addRels(drawingRels, SourceRelationshipImage, url, TargetMode)
 	ws.Unlock()
-	err = f.addDrawingLinkPicture(sheet, drawingXML, CellMark, FileMark, 1, 1, drawingRID, 0, &formatPicture{})
+	if cell != "" {
+		cell = CellMark
+	}
+	err = f.addDrawingLinkPicture(sheet, drawingXML, cell, FileMark, 1, 1, drawingRID, 0, &formatPicture{})
 	if err != nil {
 		return err
 	}
