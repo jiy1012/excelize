@@ -40,11 +40,11 @@ func TestOpenFile(t *testing.T) {
 	}
 	assert.NoError(t, f.UpdateLinkedValue())
 
-	assert.NoError(t, f.SetCellDefault("Sheet2", "A1", strconv.FormatFloat(float64(100.1588), 'f', -1, 32)))
-	assert.NoError(t, f.SetCellDefault("Sheet2", "A1", strconv.FormatFloat(float64(-100.1588), 'f', -1, 64)))
+	assert.NoError(t, f.SetCellDefault("Sheet2", "A1", strconv.FormatFloat(100.1588, 'f', -1, 32)))
+	assert.NoError(t, f.SetCellDefault("Sheet2", "A1", strconv.FormatFloat(-100.1588, 'f', -1, 64)))
 
 	// Test set cell value with illegal row number.
-	assert.EqualError(t, f.SetCellDefault("Sheet2", "A", strconv.FormatFloat(float64(-100.1588), 'f', -1, 64)),
+	assert.EqualError(t, f.SetCellDefault("Sheet2", "A", strconv.FormatFloat(-100.1588, 'f', -1, 64)),
 		newCellNameToCoordinatesError("A", newInvalidCellNameError("A")).Error())
 
 	assert.NoError(t, f.SetCellInt("Sheet2", "A1", 100))
@@ -109,7 +109,7 @@ func TestOpenFile(t *testing.T) {
 	assert.NoError(t, f.SetCellValue("Sheet2", "F5", int32(1<<32/2-1)))
 	assert.NoError(t, f.SetCellValue("Sheet2", "F6", int64(1<<32/2-1)))
 	assert.NoError(t, f.SetCellValue("Sheet2", "F7", float32(42.65418)))
-	assert.NoError(t, f.SetCellValue("Sheet2", "F8", float64(-42.65418)))
+	assert.NoError(t, f.SetCellValue("Sheet2", "F8", -42.65418))
 	assert.NoError(t, f.SetCellValue("Sheet2", "F9", float32(42)))
 	assert.NoError(t, f.SetCellValue("Sheet2", "F10", float64(42)))
 	assert.NoError(t, f.SetCellValue("Sheet2", "F11", uint(1<<32-1)))
@@ -130,14 +130,17 @@ func TestOpenFile(t *testing.T) {
 	// Test boolean write
 	booltest := []struct {
 		value    bool
+		raw      bool
 		expected string
 	}{
-		{false, "0"},
-		{true, "1"},
+		{false, true, "0"},
+		{true, true, "1"},
+		{false, false, "FALSE"},
+		{true, false, "TRUE"},
 	}
 	for _, test := range booltest {
 		assert.NoError(t, f.SetCellValue("Sheet2", "F16", test.value))
-		val, err := f.GetCellValue("Sheet2", "F16")
+		val, err := f.GetCellValue("Sheet2", "F16", Options{RawCellValue: test.raw})
 		assert.NoError(t, err)
 		assert.Equal(t, test.expected, val)
 	}
@@ -147,6 +150,7 @@ func TestOpenFile(t *testing.T) {
 	assert.NoError(t, f.SetCellValue("Sheet2", "G4", time.Now()))
 
 	assert.NoError(t, f.SetCellValue("Sheet2", "G4", time.Now().UTC()))
+	assert.EqualError(t, f.SetCellValue("SheetN", "A1", time.Now()), "sheet SheetN is not exist")
 	// 02:46:40
 	assert.NoError(t, f.SetCellValue("Sheet2", "G5", time.Duration(1e13)))
 	// Test completion column.
@@ -166,7 +170,7 @@ func TestOpenFile(t *testing.T) {
 		assert.NoError(t, f.SetCellStr("Sheet2", "c"+strconv.Itoa(i), strconv.Itoa(i)))
 	}
 	assert.NoError(t, f.SaveAs(filepath.Join("test", "TestOpenFile.xlsx")))
-	assert.EqualError(t, f.SaveAs(filepath.Join("test", strings.Repeat("c", 199), ".xlsx")), ErrMaxFileNameLength.Error())
+	assert.EqualError(t, f.SaveAs(filepath.Join("test", strings.Repeat("c", 199), ".xlsx")), ErrMaxFilePathLength.Error())
 	assert.NoError(t, f.Close())
 }
 
@@ -175,7 +179,10 @@ func TestSaveFile(t *testing.T) {
 	if !assert.NoError(t, err) {
 		t.FailNow()
 	}
-	assert.NoError(t, f.SaveAs(filepath.Join("test", "TestSaveFile.xlsx")))
+	assert.EqualError(t, f.SaveAs(filepath.Join("test", "TestSaveFile.xlsb")), ErrWorkbookExt.Error())
+	for _, ext := range []string{".xlam", ".xlsm", ".xlsx", ".xltm", ".xltx"} {
+		assert.NoError(t, f.SaveAs(filepath.Join("test", fmt.Sprintf("TestSaveFile%s", ext))))
+	}
 	assert.NoError(t, f.Close())
 	f, err = OpenFile(filepath.Join("test", "TestSaveFile.xlsx"))
 	if !assert.NoError(t, err) {
@@ -189,7 +196,7 @@ func TestSaveAsWrongPath(t *testing.T) {
 	f, err := OpenFile(filepath.Join("test", "Book1.xlsx"))
 	assert.NoError(t, err)
 	// Test write file to not exist directory.
-	assert.EqualError(t, f.SaveAs(""), "open .: is a directory")
+	assert.Error(t, f.SaveAs(filepath.Join("x", "Book1.xlsx")))
 	assert.NoError(t, f.Close())
 }
 
@@ -329,9 +336,7 @@ func TestAddDrawingVML(t *testing.T) {
 
 func TestSetCellHyperLink(t *testing.T) {
 	f, err := OpenFile(filepath.Join("test", "Book1.xlsx"))
-	if err != nil {
-		t.Log(err)
-	}
+	assert.NoError(t, err)
 	// Test set cell hyperlink in a work sheet already have hyperlinks.
 	assert.NoError(t, f.SetCellHyperLink("Sheet1", "B19", "https://github.com/xuri/excelize", "External"))
 	// Test add first hyperlink in a work sheet.
@@ -339,8 +344,7 @@ func TestSetCellHyperLink(t *testing.T) {
 	// Test add Location hyperlink in a work sheet.
 	assert.NoError(t, f.SetCellHyperLink("Sheet2", "D6", "Sheet1!D8", "Location"))
 	// Test add Location hyperlink with display & tooltip in a work sheet.
-	display := "Display value"
-	tooltip := "Hover text"
+	display, tooltip := "Display value", "Hover text"
 	assert.NoError(t, f.SetCellHyperLink("Sheet2", "D7", "Sheet1!D9", "Location", HyperlinkOpts{
 		Display: &display,
 		Tooltip: &tooltip,
@@ -369,6 +373,15 @@ func TestSetCellHyperLink(t *testing.T) {
 	ws.(*xlsxWorksheet).MergeCells = &xlsxMergeCells{Cells: []*xlsxMergeCell{{Ref: "A:A"}}}
 	err = f.SetCellHyperLink("Sheet1", "A1", "https://github.com/xuri/excelize", "External")
 	assert.EqualError(t, err, newCellNameToCoordinatesError("A", newInvalidCellNameError("A")).Error())
+
+	// Test update cell hyperlink
+	f = NewFile()
+	assert.NoError(t, f.SetCellHyperLink("Sheet1", "A1", "https://github.com", "External"))
+	assert.NoError(t, f.SetCellHyperLink("Sheet1", "A1", "https://github.com/xuri/excelize", "External"))
+	link, target, err := f.GetCellHyperLink("Sheet1", "A1")
+	assert.Equal(t, link, true)
+	assert.Equal(t, "https://github.com/xuri/excelize", target)
+	assert.NoError(t, err)
 }
 
 func TestGetCellHyperLink(t *testing.T) {
@@ -1150,9 +1163,9 @@ func TestHSL(t *testing.T) {
 	assert.Equal(t, 0.0, hueToRGB(0, 0, 2.0/4))
 	t.Log(RGBToHSL(255, 255, 0))
 	h, s, l := RGBToHSL(0, 255, 255)
-	assert.Equal(t, float64(0.5), h)
-	assert.Equal(t, float64(1), s)
-	assert.Equal(t, float64(0.5), l)
+	assert.Equal(t, 0.5, h)
+	assert.Equal(t, 1.0, s)
+	assert.Equal(t, 0.5, l)
 	t.Log(RGBToHSL(250, 100, 50))
 	t.Log(RGBToHSL(50, 100, 250))
 	t.Log(RGBToHSL(250, 50, 100))
@@ -1305,7 +1318,8 @@ func TestDeleteSheetFromWorkbookRels(t *testing.T) {
 
 func TestAttrValToInt(t *testing.T) {
 	_, err := attrValToInt("r", []xml.Attr{
-		{Name: xml.Name{Local: "r"}, Value: "s"}})
+		{Name: xml.Name{Local: "r"}, Value: "s"},
+	})
 	assert.EqualError(t, err, `strconv.Atoi: parsing "s": invalid syntax`)
 }
 
