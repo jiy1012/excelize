@@ -1,18 +1,19 @@
 package excelize
 
 import (
+	"fmt"
+	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-
-	_ "golang.org/x/image/tiff"
-
-	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	_ "golang.org/x/image/tiff"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -67,7 +68,7 @@ func TestAddPicture(t *testing.T) {
 	assert.NoError(t, f.AddPicture("Sheet1", "Q22", filepath.Join("test", "images", "excel.tif"), ""))
 
 	// Test write file to given path.
-	assert.NoError(t, f.SaveAs(filepath.Join("test", "TestAddPicture.xlsx")))
+	assert.NoError(t, f.SaveAs(filepath.Join("test", "TestAddPicture1.xlsx")))
 	assert.NoError(t, f.Close())
 }
 
@@ -90,7 +91,16 @@ func TestAddPictureErrors(t *testing.T) {
 
 	// Test add picture to worksheet with invalid file data.
 	err = f.AddPictureFromBytes("Sheet1", "G21", "", "Excel Logo", ".jpg", make([]byte, 1))
-	assert.EqualError(t, err, "image: unknown format")
+	assert.EqualError(t, err, image.ErrFormat.Error())
+
+	// Test add picture with custom image decoder and encoder.
+	decode := func(r io.Reader) (image.Image, error) { return nil, nil }
+	decodeConfig := func(r io.Reader) (image.Config, error) { return image.Config{Height: 100, Width: 90}, nil }
+	image.RegisterFormat("emf", "", decode, decodeConfig)
+	image.RegisterFormat("wmf", "", decode, decodeConfig)
+	assert.NoError(t, f.AddPicture("Sheet1", "Q1", filepath.Join("test", "images", "excel.emf"), ""))
+	assert.NoError(t, f.AddPicture("Sheet1", "Q7", filepath.Join("test", "images", "excel.wmf"), ""))
+	assert.NoError(t, f.SaveAs(filepath.Join("test", "TestAddPicture2.xlsx")))
 	assert.NoError(t, f.Close())
 }
 
@@ -103,7 +113,7 @@ func TestGetPicture(t *testing.T) {
 	file, raw, err := f.GetPicture("Sheet1", "F21")
 	assert.NoError(t, err)
 	if !assert.NotEmpty(t, filepath.Join("test", file)) || !assert.NotEmpty(t, raw) ||
-		!assert.NoError(t, ioutil.WriteFile(filepath.Join("test", file), raw, 0644)) {
+		!assert.NoError(t, ioutil.WriteFile(filepath.Join("test", file), raw, 0o644)) {
 
 		t.FailNow()
 	}
@@ -138,7 +148,7 @@ func TestGetPicture(t *testing.T) {
 	file, raw, err = f.GetPicture("Sheet1", "F21")
 	assert.NoError(t, err)
 	if !assert.NotEmpty(t, filepath.Join("test", file)) || !assert.NotEmpty(t, raw) ||
-		!assert.NoError(t, ioutil.WriteFile(filepath.Join("test", file), raw, 0644)) {
+		!assert.NoError(t, ioutil.WriteFile(filepath.Join("test", file), raw, 0o644)) {
 		t.FailNow()
 	}
 

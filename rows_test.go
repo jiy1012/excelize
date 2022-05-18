@@ -2,6 +2,7 @@ package excelize
 
 import (
 	"bytes"
+	"encoding/xml"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -44,13 +45,6 @@ func TestRows(t *testing.T) {
 	}
 	assert.NoError(t, f.Close())
 
-	f = NewFile()
-	f.Pkg.Store("xl/worksheets/sheet1.xml", []byte(`<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>1</v></c></row><row r="A"><c r="2" t="str"><v>B</v></c></row></sheetData></worksheet>`))
-	f.Sheet.Delete("xl/worksheets/sheet1.xml")
-	delete(f.checked, "xl/worksheets/sheet1.xml")
-	_, err = f.Rows("Sheet1")
-	assert.EqualError(t, err, `strconv.Atoi: parsing "A": invalid syntax`)
-
 	f.Pkg.Store("xl/worksheets/sheet1.xml", nil)
 	_, err = f.Rows("Sheet1")
 	assert.NoError(t, err)
@@ -81,8 +75,6 @@ func TestRowsIterator(t *testing.T) {
 
 	for rows.Next() {
 		rowCount++
-		assert.Equal(t, rowCount, rows.CurrentRow())
-		assert.Equal(t, expectedNumRow, rows.TotalRows())
 		require.True(t, rowCount <= expectedNumRow, "rowCount is greater than expected")
 	}
 	assert.Equal(t, expectedNumRow, rowCount)
@@ -186,7 +178,7 @@ func TestColumns(t *testing.T) {
 	assert.NoError(t, err)
 
 	rows.decoder = f.xmlNewDecoder(bytes.NewReader([]byte(`<worksheet><sheetData><row r="A"><c r="A1" t="s"><v>1</v></c></row><row r="A"><c r="2" t="str"><v>B</v></c></row></sheetData></worksheet>`)))
-	rows.stashRow, rows.curRow = 0, 1
+	assert.True(t, rows.Next())
 	_, err = rows.Columns()
 	assert.EqualError(t, err, `strconv.Atoi: parsing "A": invalid syntax`)
 
@@ -194,8 +186,8 @@ func TestColumns(t *testing.T) {
 	_, err = rows.Columns()
 	assert.NoError(t, err)
 
-	rows.curRow = 3
 	rows.decoder = f.xmlNewDecoder(bytes.NewReader([]byte(`<worksheet><sheetData><row r="1"><c r="A" t="s"><v>1</v></c></row></sheetData></worksheet>`)))
+	assert.True(t, rows.Next())
 	_, err = rows.Columns()
 	assert.EqualError(t, err, newCellNameToCoordinatesError("A", newInvalidCellNameError("A")).Error())
 
@@ -856,7 +848,8 @@ func TestDuplicateRowTo(t *testing.T) {
 	assert.Equal(t, nil, f.DuplicateRowTo(sheetName, 1, 2))
 	// Test duplicate row on the worksheet with illegal cell coordinates
 	f.Sheet.Store("xl/worksheets/sheet1.xml", &xlsxWorksheet{
-		MergeCells: &xlsxMergeCells{Cells: []*xlsxMergeCell{{Ref: "A:B1"}}}})
+		MergeCells: &xlsxMergeCells{Cells: []*xlsxMergeCell{{Ref: "A:B1"}}},
+	})
 	assert.EqualError(t, f.DuplicateRowTo(sheetName, 1, 2), newCellNameToCoordinatesError("A", newInvalidCellNameError("A")).Error())
 	// Test duplicate row on not exists worksheet
 	assert.EqualError(t, f.DuplicateRowTo("SheetN", 1, 2), "sheet SheetN is not exist")
@@ -909,12 +902,12 @@ func TestErrSheetNotExistError(t *testing.T) {
 
 func TestCheckRow(t *testing.T) {
 	f := NewFile()
-	f.Pkg.Store("xl/worksheets/sheet1.xml", []byte(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ><sheetData><row r="2"><c><v>1</v></c><c r="F2"><v>2</v></c><c><v>3</v></c><c><v>4</v></c><c r="M2"><v>5</v></c></row></sheetData></worksheet>`))
+	f.Pkg.Store("xl/worksheets/sheet1.xml", []byte(xml.Header+`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ><sheetData><row r="2"><c><v>1</v></c><c r="F2"><v>2</v></c><c><v>3</v></c><c><v>4</v></c><c r="M2"><v>5</v></c></row></sheetData></worksheet>`))
 	_, err := f.GetRows("Sheet1")
 	assert.NoError(t, err)
 	assert.NoError(t, f.SetCellValue("Sheet1", "A1", false))
 	f = NewFile()
-	f.Pkg.Store("xl/worksheets/sheet1.xml", []byte(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ><sheetData><row r="2"><c><v>1</v></c><c r="-"><v>2</v></c><c><v>3</v></c><c><v>4</v></c><c r="M2"><v>5</v></c></row></sheetData></worksheet>`))
+	f.Pkg.Store("xl/worksheets/sheet1.xml", []byte(xml.Header+`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ><sheetData><row r="2"><c><v>1</v></c><c r="-"><v>2</v></c><c><v>3</v></c><c><v>4</v></c><c r="M2"><v>5</v></c></row></sheetData></worksheet>`))
 	f.Sheet.Delete("xl/worksheets/sheet1.xml")
 	delete(f.checked, "xl/worksheets/sheet1.xml")
 	assert.EqualError(t, f.SetCellValue("Sheet1", "A1", false), newCellNameToCoordinatesError("-", newInvalidCellNameError("-")).Error())
@@ -922,13 +915,24 @@ func TestCheckRow(t *testing.T) {
 
 func TestSetRowStyle(t *testing.T) {
 	f := NewFile()
-	styleID, err := f.NewStyle(`{"fill":{"type":"pattern","color":["#E0EBF5"],"pattern":1}}`)
+	style1, err := f.NewStyle(`{"fill":{"type":"pattern","color":["#63BE7B"],"pattern":1}}`)
 	assert.NoError(t, err)
-	assert.EqualError(t, f.SetRowStyle("Sheet1", 10, -1, styleID), newInvalidRowNumberError(-1).Error())
-	assert.EqualError(t, f.SetRowStyle("Sheet1", 1, TotalRows+1, styleID), ErrMaxRows.Error())
+	style2, err := f.NewStyle(`{"fill":{"type":"pattern","color":["#E0EBF5"],"pattern":1}}`)
+	assert.NoError(t, err)
+	assert.NoError(t, f.SetCellStyle("Sheet1", "B2", "B2", style1))
+	assert.EqualError(t, f.SetRowStyle("Sheet1", 5, -1, style2), newInvalidRowNumberError(-1).Error())
+	assert.EqualError(t, f.SetRowStyle("Sheet1", 1, TotalRows+1, style2), ErrMaxRows.Error())
 	assert.EqualError(t, f.SetRowStyle("Sheet1", 1, 1, -1), newInvalidStyleID(-1).Error())
-	assert.EqualError(t, f.SetRowStyle("SheetN", 1, 1, styleID), "sheet SheetN is not exist")
-	assert.NoError(t, f.SetRowStyle("Sheet1", 10, 1, styleID))
+	assert.EqualError(t, f.SetRowStyle("SheetN", 1, 1, style2), "sheet SheetN is not exist")
+	assert.NoError(t, f.SetRowStyle("Sheet1", 5, 1, style2))
+	cellStyleID, err := f.GetCellStyle("Sheet1", "B2")
+	assert.NoError(t, err)
+	assert.Equal(t, style2, cellStyleID)
+	// Test cell inheritance rows style
+	assert.NoError(t, f.SetCellValue("Sheet1", "C1", nil))
+	cellStyleID, err = f.GetCellStyle("Sheet1", "C1")
+	assert.NoError(t, err)
+	assert.Equal(t, style2, cellStyleID)
 	assert.NoError(t, f.SaveAs(filepath.Join("test", "TestSetRowStyle.xlsx")))
 }
 
@@ -952,6 +956,10 @@ func TestNumberFormats(t *testing.T) {
 	}
 	assert.Equal(t, []string{"", "200", "450", "200", "510", "315", "127", "89", "348", "53", "37"}, cells[3])
 	assert.NoError(t, f.Close())
+}
+
+func TestRoundPrecision(t *testing.T) {
+	assert.Equal(t, "text", roundPrecision("text", 0))
 }
 
 func BenchmarkRows(b *testing.B) {
