@@ -673,7 +673,7 @@ func (f *File) getPictureFromWsDr(row, col int, drawingRelationships string, wsD
 				}
 				if drawRel = f.getDrawingRelationships(drawingRelationships,
 					anchor.Pic.BlipFill.Blip.Link); drawRel != nil {
-					if _, ok = supportImageTypes[filepath.Ext(drawRel.Target)]; ok {
+					if _, ok = supportedImageTypes[filepath.Ext(drawRel.Target)]; ok {
 						ret = filepath.Base(drawRel.Target)
 						if buffer, _ := f.Pkg.Load(strings.Replace(drawRel.Target, "..", "xl", -1)); buffer != nil {
 							buf = buffer.([]byte)
